@@ -972,6 +972,18 @@ class LaxControlFlowTest(jtu.JaxTestCase):
     out = lax.while_loop(lambda _: False, lambda _: (), ())  # doesn't crash
     self.assertEqual(out, ())
 
+  def testFixedPointImpl(self):
+    def newton_sqrt_iter(a, x): return 0.5 * (x + a / x)
+    def distance(x, y): return np.abs(x - y)
+
+    def sqrt(a, guess=10.):
+      f = lambda x: newton_sqrt_iter(a, x)
+      return lax.fixed_point(f, guess, distance, 1e-4)
+
+    ans = sqrt(2.)
+    expected = onp.sqrt(2.)
+    self.assertAllClose(ans, expected, check_dtypes=False)
+
 
 if __name__ == '__main__':
   absltest.main()
