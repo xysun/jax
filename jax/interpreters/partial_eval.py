@@ -25,6 +25,7 @@ from .. import core
 from .. import linear_util as lu
 from ..abstract_arrays import ShapedArray, ConcreteArray
 from ..linear_util import thunk, transformation, transformation_with_aux
+from ..api_util import wraps
 from ..util import unzip2, safe_zip, safe_map, toposort, partial, split_list
 from ..core import (Trace, Tracer, new_master, Jaxpr, JaxprEqn, Literal,
                     get_aval, AbstractValue, unit, unitvar, abstract_unit,
@@ -469,5 +470,46 @@ def partial_eval_jaxpr(jaxpr, unknowns, instantiate):
 
 def _split_aval(unknown, aval):
   return (abstract_unit, aval) if unknown else (aval, abstract_unit)
+
+
+class SemiTransparentFunction(object):
+  def __init__(self, fun, prim):
+    self.fun = fun
+    self.prim = prim
+    self.overrides = set()
+    wraps(fun)(self)
+
+  def __repr__(self):
+    return '<jax.custom_transforms function {fun}>'.format(fun=self.__name__)
+
+  def __call__(self, *args, **kwargs):
+    out = self.prim.bind(*args, **kwargs)
+    return out[0]
+    
+
+def semi_transparent_primitive(fun):
+  """kinda similar to custom_transforms"""
+  name = getattr(fun, '__name__', '<unnamed semi-transparent primitive>')
+  fun_p = core.Primitive(name)
+  fun_p.multiple_results = True
+  f = SemiTransparentFunction(fun, fun_p)
+
+  def impl(*args, **kwargs):
+    return [fun(*args, **kwargs)]
+
+  def bind(*args, **kwargs):
+    top_trace = core.find_top_trace(args)
+    if top_trace is None or top_trace.__class__ not in f.overrides:
+      return impl(*args, **kwargs)
+    tracers = map(top_trace.full_raise, args)
+    out_tracers = top_trace.process_primitive(fun_p, tracers, kwargs)
+    return safe_map(core.full_lower, out_tracers)
+  fun_p.def_custom_bind(bind)
+
+  def abstract_eval(*avals, **kwargs):
+    return abstract_eval_fun(impl, *avals, **kwargs)
+  fun_p.def_abstract_eval(abstract_eval)
+
+  return f
 
 custom_partial_eval_rules = {}

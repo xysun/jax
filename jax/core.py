@@ -27,6 +27,7 @@ import six
 
 from . import linear_util as lu
 from .util import safe_zip, safe_map, partial, curry
+from .api_util import wraps
 from .pprint_util import pp, vcat, hcat, pp_kv_pairs
 
 # TODO(dougalm): the trace cache breaks the leak detector. Consisder solving.
@@ -123,6 +124,7 @@ class Primitive(object):
     return '{}'.format(self.name)
 
   def bind(self, *args, **kwargs):
+    """Dispatch the primitive in the top trace's interpreter."""
     assert skip_checks or all(isinstance(arg, Tracer)
                               or valid_jaxtype(arg) for arg in args), args
     top_trace = find_top_trace(args)
@@ -191,6 +193,7 @@ def eval_jaxpr(jaxpr, consts, freevar_vals, *args):
 
 
 def full_lower(val):
+  """Drop any unneeded Tracer wrappers (e.g. batch tracers with no batch)."""
   if isinstance(val, Tracer):
     return val.full_lower()
   else:

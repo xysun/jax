@@ -35,6 +35,7 @@ from .api import custom_transforms, defjvp, jit, vmap
 from .numpy.lax_numpy import _constant_like, asarray, stack
 from jax.lib import xla_bridge
 from jax import core
+from jax.interpreters import partial_eval as pe
 from jax.scipy.special import logit
 
 
@@ -168,16 +169,22 @@ def fold_in(key, data):
 
   Args:
     key: a PRNGKey (an array with shape (2,) and dtype uint32).
-    data: a 32bit integer representing data to be folded in to the key.
+    data: data to be folded into the key; will be hashed first if not an int.
 
   Returns:
     A new PRNGKey that is a deterministic function of the inputs and is
     statistically safe for producing a stream of new pseudo-random values.
   """
-  return _fold_in(key, data)
+  return _fold_in(key, data=data)
+
+@pe.semi_transparent_primitive
+def _fold_in(key, data):
+  if not isinstance(data, int): # TODO do better
+    data = hash(data)
+  return __fold_in(key, data)
 
 @jit
-def _fold_in(key, data):
+def __fold_in(key, data):
   key2 = lax.tie_in(key, PRNGKey(data))
   return threefry_2x32(key, key2)
 
@@ -227,10 +234,14 @@ def uniform(key, shape=(), dtype=onp.float64, minval=0., maxval=1.):
     A random array with the specified shape and dtype.
   """
   dtype = xla_bridge.canonicalize_dtype(dtype)
-  return _uniform(key, shape, dtype, minval, maxval)
+  return _uniform(key, minval, maxval, shape=shape, dtype=dtype)
+
+@pe.semi_transparent_primitive
+def _uniform(key, minval, maxval, shape, dtype):
+  return __uniform(key, shape, dtype, minval, maxval)
 
 @partial(jit, static_argnums=(1, 2))
-def _uniform(key, shape, dtype, minval, maxval):
+def __uniform(key, shape, dtype, minval, maxval):
   _check_shape("uniform", shape)
   if not onp.issubdtype(dtype, onp.floating):
     raise TypeError("uniform only accepts floating point dtypes.")
